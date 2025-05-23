@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
-from sklearn.model_selection import train_test_split
-from torch.utils.data import Subset, DataLoader
+from torch.utils.data import Subset, DataLoader, random_split
 from frame_dataset import Astro
 from unet import UNet
 from tqdm import tqdm
@@ -10,41 +9,82 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from torchvision import transforms, models
 from torchvision.transforms import ToPILImage
+from torchvision.models import vgg19
 import matplotlib.pyplot as plt
 
 to_pil = ToPILImage()
+
+# Load VGG model
+vgg = models.vgg19(pretrained=True).features
+vgg.eval()  # Set to evaluation mode
+
+# Move model to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+vgg.to(device)
+
+# Define VGG feature extractor
+class VGGFeatureExtractor(nn.Module):
+    def __init__(self, vgg, layers=3):  # Extract up to the first 7 layers
+        super(VGGFeatureExtractor, self).__init__()
+        self.vgg = nn.Sequential(*list(vgg[:layers]))  # Extract layers
+
+    def forward(self, x):
+        return self.vgg(x)
+
+# Initialize the VGG feature extractor
+vgg_features = VGGFeatureExtractor(vgg, layers=7).to(device)
+
+# Define VGG loss
+class VGGPerceptualLoss(nn.Module): 
+    def __init__(self):
+        super(VGGPerceptualLoss, self).__init__()
+        self.criterion = nn.MSELoss()
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device) # Source for values: https://gist.github.com/alper111/8233cdb0414b4cb5853f2f730ab95a49?permalink_comment_id=4423554
+        self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
+
+    def forward(self, truth_frame, gen_frame):
+
+        # Normalize input
+        gen_frame = (gen_frame - self.mean) / self.std
+        truth_frame = (truth_frame - self.mean) / self.std
+
+        # Compute feature maps using VGG
+        gen_features = vgg_features(gen_frame)
+        true_features = vgg_features(truth_frame)
+
+        # Compute loss
+        loss = self.criterion(gen_features, true_features)
+        return loss
+
 
 # -------------------------------- Split Dataset -----------------------------------
 
 astro = Astro()
 
-indices = list(range(len(astro)))
+total_len  = len(astro)
+train_len  = int(0.70 * total_len)          # 70 %
+val_len    = int(0.15 * total_len)          # 15 %
+test_len   = total_len - train_len - val_len  # remaining 15 %
 
-train_indices, temp = train_test_split(indices, test_size=0.3, random_state=42, shuffle=True)
-
-val_indices, test_indices = train_test_split(temp, test_size=0.5, random_state=42, shuffle=True)
-
-train_dataset = Subset(astro, train_indices)
-val_dataset = Subset(astro, val_indices)
-test_dataset = Subset(astro, test_indices)
+train_dataset, val_dataset, test_dataset = random_split(astro, [train_len, val_len, test_len])
 
 print(len(train_dataset), len(val_dataset), len(test_dataset))
 
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=8, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=8, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=4, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=4, shuffle=True)
 
 # ----------------------------------------------------------------------------------
 
 learning_rate = 1e-4
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 model = UNet().to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
+perceptual_loss = VGGPerceptualLoss().to(device)
 
 epochs = 25
 
@@ -54,6 +94,8 @@ val_loss = 0
 train_losses = []
 
 for epoch in range(epochs):
+
+    train_loss = 0
 
     model.train()
 
@@ -65,8 +107,12 @@ for epoch in range(epochs):
         optimizer.zero_grad()
 
         y_pred = model(x_train)
-        loss = criterion(y_train, y_pred)
+
+        adv_loss = criterion(y_train, y_pred)
+        vgg_loss = perceptual_loss(y_train, y_pred)
         
+        loss = adv_loss + 0.1 * vgg_loss
+
         loss.backward()
         optimizer.step()
 
