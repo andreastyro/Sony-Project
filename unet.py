@@ -42,7 +42,7 @@ class UNet(nn.Module):
         self.transpose4  = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec4 = Block(128,  64)
 
-        self.out = nn.Conv2d(64, 1, kernel_size=1)
+        self.out = nn.Conv2d(64, 3, kernel_size=1)
 
         self.sigmoid = nn.Sigmoid()
 

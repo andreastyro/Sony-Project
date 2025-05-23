@@ -92,10 +92,12 @@ train_loss = 0
 val_loss = 0
 
 train_losses = []
+val_losses = []
 
 for epoch in range(epochs):
 
     train_loss = 0
+    val_loss = 0
 
     model.train()
 
@@ -122,15 +124,37 @@ for epoch in range(epochs):
 
     print(train_loss/len(train_loader))
 
+    with torch.no_grad():
+        
+        model.eval()
+
+        for x_val, y_val in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
+
+            x_val = x_val.to(device)
+            y_val = y_val.to(device)
+
+            y_pred = model(x_val)
+
+            adv_loss = criterion(y_val, y_pred)
+            vgg_loss = perceptual_loss(y_val, y_pred)
+
+            loss = adv_loss + 0.1 * vgg_loss
+
+            val_loss += loss
+
+        val_losses.append(val_loss)
+
+    print(val_loss/len(val_loader))
+
     output = y_pred[0].detach().cpu().clamp(0, 1)
     img = to_pil(output)
     img.save(f"frame{epoch+1}.png")
 
-    input_pair = x_train[0].cpu()
+    input_pair = x_val[0].cpu()
     f1 = input_pair[:3]
     f3 = input_pair[3:]
 
-    f2_gt = y_train[0].cpu()
+    f2_gt = y_val[0].cpu()
     f2_pred = y_pred[0].detach().cpu().clamp(0, 1)
 
     # Convert all to PIL images
@@ -166,3 +190,4 @@ for epoch in range(epochs):
     plt.tight_layout()
     plt.savefig("comparison_grid.png")
     plt.show()
+    
