@@ -13,6 +13,10 @@ from torchvision import transforms, models
 from torchvision.transforms import ToPILImage
 from torchvision.models import vgg19
 import matplotlib.pyplot as plt
+import torchvision.transforms.functional as TF
+
+
+os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 
 to_pil = ToPILImage()
 
@@ -61,7 +65,10 @@ class VGGPerceptualLoss(nn.Module):
 
 # -------------------------------- Split Dataset -----------------------------------
 
-astro = Astro()
+frame_gap = 5
+frames = frame_gap - 1
+
+astro = Astro(frame_gap=frame_gap)
 
 total_len  = len(astro)
 train_len  = int(0.70 * total_len)          # 70 %
@@ -80,7 +87,7 @@ test_loader = DataLoader(test_dataset, batch_size=4, shuffle=True)
 
 learning_rate = 1e-4
 
-model = UNet().to(device)
+model = UNet(frames=frames).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
@@ -102,13 +109,23 @@ for epoch in range(epochs):
     model.train()
 
     for x_train, y_train in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
-        
+        #print("y_train shape:", y_train.shape)
+
+        #B, T, C, H, W = y_train.shape
+        #y_train = y_train.view(B * T, C, H, W) # Reduce 5 dimensions to 4
+
         x_train = x_train.to(device)
         y_train = y_train.to(device)
 
         optimizer.zero_grad()
 
         y_pred = model(x_train)
+
+        B, C, H, W = y_pred.shape
+        T = C // 3
+
+        y_train = y_train.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+        y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
         adv_loss = criterion(y_train, y_pred)
         vgg_loss = perceptual_loss(y_train, y_pred)
@@ -118,7 +135,7 @@ for epoch in range(epochs):
         loss.backward()
         optimizer.step()
 
-        train_loss += loss
+        train_loss += loss.item()
 
     train_losses.append(train_loss)
 
@@ -133,61 +150,78 @@ for epoch in range(epochs):
             x_val = x_val.to(device)
             y_val = y_val.to(device)
 
+            #print(y_val.shape)
+            #print(y_pred.shape)
+
             y_pred = model(x_val)
+
+            B, C, H, W = y_pred.shape
+            T = C // 3
+
+            y_val = y_val.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+            y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+
 
             adv_loss = criterion(y_val, y_pred)
             vgg_loss = perceptual_loss(y_val, y_pred)
 
             loss = adv_loss + 0.1 * vgg_loss
 
-            val_loss += loss
+            val_loss += loss.item()
 
         val_losses.append(val_loss)
 
     print(val_loss/len(val_loader))
 
-    output = y_pred[0].detach().cpu().clamp(0, 1)
-    img = to_pil(output)
-    img.save(f"frame{epoch+1}.png")
+    B = x_val.size(0)
+    T = C // 3
+    C = y_pred.size(1)         # C == 3*T
+    H, W = y_pred.size(-2), y_pred.size(-1)
 
-    input_pair = x_val[0].cpu()
-    f1 = input_pair[:3]
-    f3 = input_pair[3:]
+    y_pred_seq = y_pred.view(B, T, 3, H, W)   # [B, T, 3, H, W]
+    y_val_seq  = y_val .view(B, T, 3, H, W)
 
-    f2_gt = y_val[0].cpu()
-    f2_pred = y_pred[0].detach().cpu().clamp(0, 1)
+    # ----------------- save a middle predicted frame ------------------
+    mid_idx = T // 2                         # middle frame index
+    middle_pred = y_pred_seq[0, mid_idx].detach().cpu().clamp(0, 1)  # (3,H,W)
+    TF.to_pil_image(middle_pred).save(f"frame{epoch+1}.png")
 
-    # Convert all to PIL images
-    f1_img = to_pil(f1)
-    f2_gt_img = to_pil(f2_gt)
-    f3_img = to_pil(f3)
-    f2_pred_img = to_pil(f2_pred)
+    # ----------------- plot full sequence grid for first sample -------
+    fig_seq, axs_seq = plt.subplots(2, T, figsize=(3*T, 6))
 
-    # Plot
-    fig, axs = plt.subplots(2, 3, figsize=(10, 6))
+    for t in range(T):
+        gt   = y_val_seq [0, t].detach().cpu().clamp(0, 1)
+        pred = y_pred_seq[0, t].detach().cpu().clamp(0, 1)
 
-    # Top row: ground truth
-    axs[0, 0].imshow(f1_img)
-    axs[0, 0].set_title("Frame 1")
-    axs[0, 1].imshow(f2_gt_img)
-    axs[0, 1].set_title("Ground Truth (Frame 2)")
-    axs[0, 2].imshow(f3_img)
-    axs[0, 2].set_title("Frame 3")
-
-    # Bottom row: predicted
-    axs[1, 0].imshow(f1_img)
-    axs[1, 0].set_title("Frame 1")
-    axs[1, 1].imshow(f2_pred_img)
-    axs[1, 1].set_title("Predicted Frame 2")
-    axs[1, 2].imshow(f3_img)
-    axs[1, 2].set_title("Frame 3")
-
-    # Clean up axes
-    for ax_row in axs:
-        for ax in ax_row:
-            ax.axis("off")
+        axs_seq[0, t].imshow(TF.to_pil_image(gt));   axs_seq[0, t].set_title(f"GT t{t+1}")
+        axs_seq[1, t].imshow(TF.to_pil_image(pred)); axs_seq[1, t].set_title(f"Pred t{t+1}")
+        axs_seq[0, t].axis("off"); axs_seq[1, t].axis("off")
 
     plt.tight_layout()
+    plt.savefig("sequence_grid.png")
+    plt.close(fig_seq)
+
+    # ----------------- plot first / middle / last comparison ----------
+    input_pair = x_val[0].cpu()
+    f1 = input_pair[:3]                     # first frame (3,H,W)
+    f3 = input_pair[3:]                     # last  frame (3,H,W)
+
+    gt_mid   = y_val_seq [0, mid_idx].cpu()
+    pred_mid = y_pred_seq[0, mid_idx].cpu()
+
+    fig_cmp, axs_cmp = plt.subplots(2, 3, figsize=(10, 6))
+
+    # top row: ground truth frames
+    axs_cmp[0,0].imshow(TF.to_pil_image(f1));      axs_cmp[0,0].set_title("Frame 1")
+    axs_cmp[0,1].imshow(TF.to_pil_image(gt_mid));  axs_cmp[0,1].set_title("GT mid")
+    axs_cmp[0,2].imshow(TF.to_pil_image(f3));      axs_cmp[0,2].set_title("Frame 3")
+
+    # bottom row: predicted mid frame
+    axs_cmp[1,0].imshow(TF.to_pil_image(f1));      axs_cmp[1,0].set_title("Frame 1")
+    axs_cmp[1,1].imshow(TF.to_pil_image(pred_mid));axs_cmp[1,1].set_title("Pred mid")
+    axs_cmp[1,2].imshow(TF.to_pil_image(f3));      axs_cmp[1,2].set_title("Frame 3")
+
+    for ax in axs_cmp.flatten(): ax.axis("off")
+    plt.tight_layout()
     plt.savefig("comparison_grid.png")
-    plt.show()
-    
+    plt.close(fig_cmp)
