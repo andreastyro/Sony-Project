@@ -24,14 +24,70 @@ class Astro(Dataset):
 
         df = pd.read_csv(action_csv)
     
-        df["FRAMES"] = self.df["TIMESTAMP"] // (1000/60)
+        df["FRAME"] = df["TIMESTAMP"] // (1000/60)
 
-        full = pd.DataFrame({"FRAMES": range(len(self.frames))})
+        # Insert rows before first action
 
-        df = full.merge(df, on="FRAMES", how="left")
+        first_row = df.iloc[[0]]
+        first_action = int(df["FRAME"].iloc[0])
 
-        self.df = df.fillna(0).astype(df.dtypes)
-        
+        first_row["LSTICKX"] = 127
+        first_row["LSTICKY"] = 127
+        first_row["RSTICKX"] = 127
+        first_row["RSTICKY"] = 127
+
+        print(first_row)
+
+        empty_actions = []
+
+        print(first_action)
+
+        for i in range(1, first_action):
+
+            custom_row = first_row.copy()
+
+            custom_row["FRAME"] = i
+            empty_actions.append(custom_row)
+
+        df = pd.concat([df] + empty_actions, ignore_index=True)
+
+        print(df)
+
+        # Insert Rows in between action gaps
+
+        for i in range(len(df) - 1):
+
+            rows_inserted = []
+            
+            current_row = df.iloc[[i]]
+
+            current_action = int(df["FRAME"][i])
+            next_action = int(df["FRAME"][i+1])
+
+            difference = next_action - current_action
+
+            if difference > 1:
+
+                for j in range(1, difference):
+
+                    new_row = current_row.copy()
+
+                    new_row["FRAME"] = new_row["FRAME"] + j
+
+                    rows_inserted.append(new_row)
+
+                df = pd.concat([df] + rows_inserted, ignore_index=True)
+                
+                df = df.set_index("FRAME")
+                df = df.sort_index()
+                df = df.reset_index()
+
+        df.to_csv("C:/Users/andre/OneDrive/Desktop/debug_fallback.csv", index=False)
+
+        print(df)
+
+        print("✅ Saved CSV successfully!")            
+
     def __len__(self):
         
         return max(0, len(self.frames) - self.frame_gap)
