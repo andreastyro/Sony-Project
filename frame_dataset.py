@@ -14,8 +14,6 @@ class Astro(Dataset):
             root_dir = Path(__file__).resolve().parent.parent
             frame_dir = root_dir / "Data" / "extracted_frames"
 
-            print(frame_dir)
-
         self.frames = sorted(glob.glob(f"{frame_dir}/*.png"))
 
         if action_csv is None:
@@ -24,45 +22,37 @@ class Astro(Dataset):
 
         df = pd.read_csv(action_csv)
     
-        df["FRAME"] = df["TIMESTAMP"] // (1000/60)
+        df["FRAME"] = (df["TIMESTAMP"] // (1000/60))
 
         # Insert rows before first action
+
+        df.to_csv("C:/Users/andre/OneDrive/Desktop/debug.csv", index=False)
 
         first_row = df.iloc[[0]]
         first_action = int(df["FRAME"].iloc[0])
 
-        first_row["LSTICKX"] = 127
-        first_row["LSTICKY"] = 127
-        first_row["RSTICKX"] = 127
-        first_row["RSTICKY"] = 127
+        first_row.loc[:, ["LSTICKX", "LSTICKY", "RSTICKX", "RSTICKY"]] = 127
 
-        print(first_row)
-
-        empty_actions = []
-
-        print(first_action)
+        rows_inserted = []
 
         for i in range(1, first_action):
 
             custom_row = first_row.copy()
 
             custom_row["FRAME"] = i
-            empty_actions.append(custom_row)
-
-        df = pd.concat([df] + empty_actions, ignore_index=True)
-
-        print(df)
+            rows_inserted.append(custom_row)
 
         # Insert Rows in between action gaps
-
+        
         for i in range(len(df) - 1):
 
-            rows_inserted = []
-            
-            current_row = df.iloc[[i]]
+            current_row = df.iloc[[i]].copy()
 
-            current_action = int(df["FRAME"][i])
-            next_action = int(df["FRAME"][i+1])
+            current_action = int(current_row["FRAME"].values[0])
+            next_action = int(df["FRAME"].iloc[i+1])
+
+            if current_action == next_action:
+                df["FRAME"].iloc[i+1] = next_action + 1 # Eliminates Rounding duplication of frame numbers
 
             difference = next_action - current_action
 
@@ -76,13 +66,13 @@ class Astro(Dataset):
 
                     rows_inserted.append(new_row)
 
-                df = pd.concat([df] + rows_inserted, ignore_index=True)
-                
-                df = df.set_index("FRAME")
-                df = df.sort_index()
-                df = df.reset_index()
+        df = pd.concat([df] + rows_inserted, ignore_index=True)
+        
+        df = df.set_index("FRAME")
+        df = df.sort_index()
+        df = df.reset_index()
 
-        df.to_csv("C:/Users/andre/OneDrive/Desktop/debug_fallback.csv", index=False)
+        df.to_csv("C:/Users/andre/OneDrive/Desktop/debug.csv", index=False)
 
         print(df)
 
