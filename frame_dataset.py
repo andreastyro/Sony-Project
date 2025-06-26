@@ -26,8 +26,6 @@ class Astro(Dataset):
 
         # Insert rows before first action
 
-        df.to_csv("C:/Users/andre/OneDrive/Desktop/debug.csv", index=False)
-
         first_row = df.iloc[[0]]
         first_action = int(df["FRAME"].iloc[0])
 
@@ -52,7 +50,7 @@ class Astro(Dataset):
             next_action = int(df["FRAME"].iloc[i+1])
 
             if current_action == next_action:
-                df["FRAME"].iloc[i+1] = next_action + 1 # Eliminates Rounding duplication of frame numbers
+                df.iloc[i+1, df.columns.get_loc("FRAME")] = next_action + 1 # Eliminates Rounding duplication of frame numbers
 
             difference = next_action - current_action
 
@@ -66,17 +64,35 @@ class Astro(Dataset):
 
                     rows_inserted.append(new_row)
 
+        last_row = df.iloc[[-1]]
+        last_action = int(df["FRAME"].iloc[-1])
+
+        difference = len(self.frames) - last_action
+
+        for i in range(1, difference+1):
+
+            new_row = last_row.copy()
+            new_row["FRAME"] = new_row["FRAME"] + j
+
+            rows_inserted.append(new_row)
+
+
         df = pd.concat([df] + rows_inserted, ignore_index=True)
         
         df = df.set_index("FRAME")
         df = df.sort_index()
         df = df.reset_index()
 
-        df.to_csv("C:/Users/andre/OneDrive/Desktop/debug.csv", index=False)
+        self.df = df
+
+        print(len(self.frames))
+        print(len(self.df))
+
+        self.action_dimensions  = len(self.df.columns) # feature count
 
         print(df)
 
-        print("✅ Saved CSV successfully!")            
+        print("Saved CSV successfully!")            
 
     def __len__(self):
         
@@ -85,6 +101,7 @@ class Astro(Dataset):
     def __getitem__(self, idx):
 
         frame_list = []
+        action_list = []
 
         if idx < 0 or idx >= len(self):
             raise IndexError(f"Index {idx} out of bounds for dataset with length {len(self)}")
@@ -92,26 +109,30 @@ class Astro(Dataset):
         first_frame = cv2.cvtColor(cv2.imread(self.frames[idx]), cv2.COLOR_BGR2RGB)
         first_action = self.df.iloc[idx]
 
-        for frame in range(1, self.frame_gap):
-            new_frame = cv2.cvtColor(cv2.imread(self.frames[idx + frame]), cv2.COLOR_BGR2RGB)
-            new_action = self.df.iloc[idx + frame]
-
-            frame_list.append(new_frame)
-
-        last_frame = cv2.cvtCoslor(cv2.imread(self.frames[idx + self.frame_gap]), cv2.COLOR_BGR2RGB)
-        last_action = self.df.iloc[idx + self.frame_gap]
-
         # Normalize and reshape to CxHxW
         first_frame = torch.tensor(first_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
         first_action = torch.tensor(first_action, dtype=torch.float32)
 
-        frame_list = [torch.tensor(f / 255.0, dtype=torch.float32).permute(2, 0, 1) for f in frame_list]
+        for frame in range(1, self.frame_gap):
+            new_frame = cv2.cvtColor(cv2.imread(self.frames[idx + frame]), cv2.COLOR_BGR2RGB)
+            new_action = self.df.iloc[idx + frame]
+            
+            new_frame = torch.tensor(new_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
+            new_action = torch.tensor(new_action, dtype=torch.float32)
+
+            frame_list.append(new_frame)
+            action_list.append(new_action)
+
+        last_frame = cv2.cvtColor(cv2.imread(self.frames[idx + self.frame_gap]), cv2.COLOR_BGR2RGB)
+        last_action = self.df.iloc[idx + self.frame_gap]
 
         last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
         last_action = torch.tensor(last_action, dtype=torch.float32)
 
-        input_pair = torch.cat([first_frame, last_frame], dim=0)  # shape (6, H, W)
+        frame_pair = torch.cat([first_frame, last_frame], dim=0)  # shape (6, H, W)
+        action_pair = torch.cat([first_action, last_action])
 
         frame_list = torch.cat(frame_list, dim=0)
-        
-        return input_pair, frame_list  # input, target
+        action_list = torch.cat(action_list, dim=0)
+
+        return (frame_pair, action_pair), (frame_list, action_list)  # input, target

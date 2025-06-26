@@ -62,13 +62,14 @@ class VGGPerceptualLoss(nn.Module):
         loss = self.criterion(gen_features, true_features)
         return loss
 
-
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 5
+frame_gap = 2
 frames = frame_gap - 1
 
 astro = Astro(frame_gap=frame_gap)
+
+action_dim = astro.action_dimensions
 
 total_len  = len(astro)
 train_len  = int(0.70 * total_len)          # 70 %
@@ -87,7 +88,7 @@ test_loader = DataLoader(test_dataset, batch_size=4, shuffle=True)
 
 learning_rate = 1e-4
 
-model = UNet(frames=frames).to(device)
+model = UNet(frames=frames, action_dim=action_dim * 2).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
@@ -108,27 +109,29 @@ for epoch in range(epochs):
 
     model.train()
 
-    for x_train, y_train in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
+    for (x_train_frames, x_train_actions), (y_train_frames, y_train_actions) in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
         #print("y_train shape:", y_train.shape)
 
         #B, T, C, H, W = y_train.shape
         #y_train = y_train.view(B * T, C, H, W) # Reduce 5 dimensions to 4
 
-        x_train = x_train.to(device)
-        y_train = y_train.to(device)
+        x_train_frames = x_train_frames.to(device)
+        x_train_actions = x_train_actions.to(device)
+        y_train_frames = y_train_frames.to(device)
+        y_train_actions = y_train_actions.to(device)
 
         optimizer.zero_grad()
 
-        y_pred = model(x_train)
+        y_pred = model(x_train_frames, x_train_actions)
 
         B, C, H, W = y_pred.shape
         T = C // 3
 
-        y_train = y_train.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+        y_train_frames = y_train_frames.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
         y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
-        adv_loss = criterion(y_train, y_pred)
-        vgg_loss = perceptual_loss(y_train, y_pred)
+        adv_loss = criterion(y_train_frames, y_pred)
+        vgg_loss = perceptual_loss(y_train_frames, y_pred)
         
         loss = adv_loss + 0.1 * vgg_loss
 
@@ -145,25 +148,26 @@ for epoch in range(epochs):
         
         model.eval()
 
-        for x_val, y_val in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
+        for (x_val_frames, x_val_actions), (y_val_frames, y_val_actions) in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
 
-            x_val = x_val.to(device)
-            y_val = y_val.to(device)
+            x_val_frames = x_val_frames.to(device)
+            x_val_actions = x_val_actions.to(device)
+            y_val_frames = y_val_frames.to(device)
+            y_val_actions = y_val_actions.to(device)
 
             #print(y_val.shape)
             #print(y_pred.shape)
 
-            y_pred = model(x_val)
+            y_pred = model(x_val_frames, x_val_actions)
 
             B, C, H, W = y_pred.shape
             T = C // 3
 
-            y_val = y_val.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+            y_val_frames = y_val_frames.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
             y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
-
-            adv_loss = criterion(y_val, y_pred)
-            vgg_loss = perceptual_loss(y_val, y_pred)
+            adv_loss = criterion(y_val_frames, y_pred)
+            vgg_loss = perceptual_loss(y_val_frames, y_pred)
 
             loss = adv_loss + 0.1 * vgg_loss
 
@@ -173,13 +177,13 @@ for epoch in range(epochs):
 
     print(val_loss/len(val_loader))
 
-    B = x_val.size(0)
+    B = y_val_frames.size(0)
     T = C // 3
     C = y_pred.size(1)         # C == 3*T
     H, W = y_pred.size(-2), y_pred.size(-1)
 
     y_pred_seq = y_pred.view(B, T, 3, H, W)   # [B, T, 3, H, W]
-    y_val_seq  = y_val .view(B, T, 3, H, W)
+    y_val_seq  = y_val_frames .view(B, T, 3, H, W)
 
     # ----------------- save a middle predicted frame ------------------
     mid_idx = T // 2                         # middle frame index
@@ -187,22 +191,27 @@ for epoch in range(epochs):
     TF.to_pil_image(middle_pred).save(f"frame{epoch+1}.png")
 
     # ----------------- plot full sequence grid for first sample -------
-    fig_seq, axs_seq = plt.subplots(2, T, figsize=(3*T, 6))
+    fig_seq, axs_seq = plt.subplots(2, T, figsize=(3*T, 6), squeeze=False)
 
     for t in range(T):
-        gt   = y_val_seq [0, t].detach().cpu().clamp(0, 1)
+        gt   = y_val_seq[0, t].detach().cpu().clamp(0, 1)
         pred = y_pred_seq[0, t].detach().cpu().clamp(0, 1)
 
-        axs_seq[0, t].imshow(TF.to_pil_image(gt));   axs_seq[0, t].set_title(f"GT t{t+1}")
-        axs_seq[1, t].imshow(TF.to_pil_image(pred)); axs_seq[1, t].set_title(f"Pred t{t+1}")
-        axs_seq[0, t].axis("off"); axs_seq[1, t].axis("off")
+        axs_seq[0, t].imshow(TF.to_pil_image(gt))
+        axs_seq[0, t].set_title(f"GT t{t+1}")
 
-    plt.tight_layout()
-    plt.savefig("sequence_grid.png")
-    plt.close(fig_seq)
+        axs_seq[1, t].imshow(TF.to_pil_image(pred))
+        axs_seq[1, t].set_title(f"Pred t{t+1}")
+
+        axs_seq[0, t].axis("off")
+        axs_seq[1, t].axis("off")
+        
+        plt.tight_layout()
+        plt.savefig("sequence_grid.png")
+        plt.close(fig_seq)
 
     # ----------------- plot first / middle / last comparison ----------
-    input_pair = x_val[0].cpu()
+    input_pair = x_val_frames[0].cpu()
     f1 = input_pair[:3]                     # first frame (3,H,W)
     f3 = input_pair[3:]                     # last  frame (3,H,W)
 

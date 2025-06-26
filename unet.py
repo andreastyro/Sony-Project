@@ -14,8 +14,15 @@ class Block(nn.Sequential):
 
 class UNet(nn.Module):
 
-    def __init__(self, frames):
+    def __init__(self, frames, action_dim):
         super(UNet, self).__init__()
+
+        self.action_mlp = nn.Sequential(
+            nn.Linear(action_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1024),
+            nn.ReLU()
+        )
 
         # Contracting path
         self.enc1 = Block(6, 64)
@@ -47,15 +54,22 @@ class UNet(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
 
-    def forward(self, x):
+    def forward(self, frames, actions):
+
         # Encoder
-        s1 = self.enc1(x)
+        s1 = self.enc1(frames)
         s2 = self.enc2(self.pool(s1))
         s3 = self.enc3(self.pool(s2))
         s4 = self.enc4(self.pool(s3))
 
         # Bottleneck
         b  = self.bottleneck(self.pool(s4))
+
+        action_features = self.action_mlp(actions)
+
+        action_features = action_features.unsqueeze(-1).unsqueeze(-1)
+
+        b = b + action_features
 
         # Decoder + Skip Connections
         up1 = self.transpose1(b)
