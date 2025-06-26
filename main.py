@@ -64,7 +64,7 @@ class VGGPerceptualLoss(nn.Module):
 
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 2
+frame_gap = 21
 frames = frame_gap - 1
 
 astro = Astro(frame_gap=frame_gap)
@@ -163,8 +163,11 @@ for epoch in range(epochs):
             B, C, H, W = y_pred.shape
             T = C // 3
 
-            y_val_frames = y_val_frames.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
-            y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+            y_val_seq = y_val_frames.view(B, T, 3, H, W)
+            y_pred_seq = y_pred.view(B, T, 3, H, W)
+
+            y_val_frames = y_val_seq.reshape(B * T, 3, H, W)
+            y_pred  = y_pred_seq.reshape(B * T, 3, H, W)
 
             adv_loss = criterion(y_val_frames, y_pred)
             vgg_loss = perceptual_loss(y_val_frames, y_pred)
@@ -176,14 +179,6 @@ for epoch in range(epochs):
         val_losses.append(val_loss)
 
     print(val_loss/len(val_loader))
-
-    B = y_val_frames.size(0)
-    T = C // 3
-    C = y_pred.size(1)         # C == 3*T
-    H, W = y_pred.size(-2), y_pred.size(-1)
-
-    y_pred_seq = y_pred.view(B, T, 3, H, W)   # [B, T, 3, H, W]
-    y_val_seq  = y_val_frames .view(B, T, 3, H, W)
 
     # ----------------- save a middle predicted frame ------------------
     mid_idx = T // 2                         # middle frame index
@@ -206,9 +201,9 @@ for epoch in range(epochs):
         axs_seq[0, t].axis("off")
         axs_seq[1, t].axis("off")
         
-        plt.tight_layout()
-        plt.savefig("sequence_grid.png")
-        plt.close(fig_seq)
+    plt.tight_layout()
+    plt.savefig("sequence_grid.png")
+    plt.close(fig_seq)
 
     # ----------------- plot first / middle / last comparison ----------
     input_pair = x_val_frames[0].cpu()
