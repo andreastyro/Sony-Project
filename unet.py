@@ -37,7 +37,7 @@ class UNet(nn.Module):
 
         # Expansive path
 
-        self.transpose1 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.transpose1 = nn.ConvTranspose2d(2048, 512, kernel_size=2, stride=2)
         self.dec1 = Block(1024, 512)
         
         self.transpose2 = nn.ConvTranspose2d(512,  256,  kernel_size=2, stride=2)
@@ -69,10 +69,13 @@ class UNet(nn.Module):
 
         action_features = action_features.unsqueeze(-1).unsqueeze(-1)
 
-        b = b + action_features
+        action_features = action_features.expand(-1, -1, b.size(2), b.size(3))
+
+        b = torch.cat([b, action_features], dim=1)
 
         # Decoder + Skip Connections
         up1 = self.transpose1(b)
+
         d1 = self.dec1(torch.cat([up1, s4], dim=1))
 
         up2 = self.transpose2(d1)
