@@ -85,15 +85,8 @@ class Astro(Dataset):
 
         self.df = df
 
-        print(len(self.frames))
-        print(len(self.df))
-
         self.action_dimensions  = len(self.df.columns) # feature count
-
-        print(df)
-
-        print("Saved CSV successfully!")            
-
+        
     def __len__(self):
         
         return max(0, len(self.frames) - self.frame_gap)

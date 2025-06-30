@@ -18,9 +18,9 @@ class UNet(nn.Module):
         super(UNet, self).__init__()
 
         self.action_mlp = nn.Sequential(
-            nn.Linear(action_dim, 256),
+            nn.Linear(action_dim, 64),
             nn.ReLU(),
-            nn.Linear(256, 1024),
+            nn.Linear(64, 128),
             nn.ReLU()
         )
 
@@ -37,7 +37,7 @@ class UNet(nn.Module):
 
         # Expansive path
 
-        self.transpose1 = nn.ConvTranspose2d(2048, 512, kernel_size=2, stride=2)
+        self.transpose1 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
         self.dec1 = Block(1024, 512)
         
         self.transpose2 = nn.ConvTranspose2d(512,  256,  kernel_size=2, stride=2)
@@ -53,6 +53,10 @@ class UNet(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
+        D = 128
+        F = 144
+
+        self.fuse_proj = nn.Linear(in_features=F+D, out_features=F, bias=True)
 
     def forward(self, frames, actions):
 
@@ -65,16 +69,22 @@ class UNet(nn.Module):
         # Bottleneck
         b  = self.bottleneck(self.pool(s4))
 
+        B, C, H, W = b.shape
+
+        b = b.view(B, C, H * W)
+
         action_features = self.action_mlp(actions)
 
-        action_features = action_features.unsqueeze(-1).unsqueeze(-1)
+        action_features = action_features.unsqueeze(1).expand(-1, C, -1)
 
-        action_features = action_features.expand(-1, -1, b.size(2), b.size(3))
+        fused = torch.cat([b, action_features], dim=-1)
 
-        b = torch.cat([b, action_features], dim=1)
+        fused = self.fuse_proj(fused)
+
+        fused = fused.view(B, C, H, W)
 
         # Decoder + Skip Connections
-        up1 = self.transpose1(b)
+        up1 = self.transpose1(fused)
 
         d1 = self.dec1(torch.cat([up1, s4], dim=1))
 

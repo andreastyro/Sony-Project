@@ -78,8 +78,6 @@ test_len   = total_len - train_len - val_len  # remaining 15 %
 
 train_dataset, val_dataset, test_dataset = random_split(astro, [train_len, val_len, test_len])
 
-print(len(train_dataset), len(val_dataset), len(test_dataset))
-
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=4, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=4, shuffle=True)
