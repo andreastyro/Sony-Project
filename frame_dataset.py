@@ -6,6 +6,123 @@ from torch.utils.data import Dataset
 from pathlib import Path
 import pandas as pd
 
+class Astro_Multi(Dataset):
+    def __init__(self, frame_gap, root_dir=None):
+
+        if root_dir==None:
+            self.root_dir = Path(__file__).resolve().parent.parent / "Data" / "extracted_frames"
+
+        else:
+            self.root_dir = Path(root_dir)
+
+        self.frame_gap = frame_gap
+        
+        self.trajectory_dir = [d for d in self.root_dir.iterdir() if d.is_dir()]
+        self.trajectory_ids = [d.name for d in self.trajectory_dir]
+
+        self.lookup_table = {}
+        self.build_lookup_table()
+
+    def build_lookup_table(self):
+
+        self.lookup_table = {}
+
+        starting_index = 0
+        self.cumulative_frames = 0
+
+        for trajectory_id in self.trajectory_ids:
+
+            frames_dir = self.root_dir / trajectory_id
+            self.frames = sorted(glob.glob(f"{frames_dir}/*.jpg"))
+
+            self.actions_csv = frames_dir / "actions.csv"
+
+            df = pd.read_csv(self.actions_csv)
+            df = self.process_actions(df)
+
+            num_sequences = len(df) - self.frame_gap
+            num_frames = len(df)
+
+            self.cumulative_frames += num_frames
+
+            self.lookup_table[self.cumulative_frames] = {
+                'trajectory_id': trajectory_id,
+                'frames': self.frames,
+                'actions_df': df,
+                'num_frames': num_frames,
+                'num_sequences': num_sequences,
+                'starting_index': starting_index
+            }
+
+            starting_index = self.cumulative_frames
+
+            print(self.lookup_table)
+
+    def process_actions(self, df):
+
+        df["FRAME"] = (df["TIMESTAMP"] // (1000/60))
+
+        # Insert rows before first action
+
+        first_row = df.iloc[[0]]
+        first_action = int(df["FRAME"].iloc[0])
+
+        first_row.loc[:, ["LSTICKX", "LSTICKY", "RSTICKX", "RSTICKY"]] = 127
+
+        rows_inserted = []
+
+        for i in range(1, first_action):
+
+            custom_row = first_row.copy()
+
+            custom_row["FRAME"] = i
+            rows_inserted.append(custom_row)
+
+        # Insert Rows in between action gaps
+        
+        for i in range(len(df) - 1):
+
+            current_row = df.iloc[[i]].copy()
+
+            current_action = int(current_row["FRAME"].values[0])
+            next_action = int(df["FRAME"].iloc[i+1])
+
+            if current_action == next_action:
+                df.iloc[i+1, df.columns.get_loc("FRAME")] = next_action + 1 # Eliminates Rounding duplication of frame numbers
+
+            difference = next_action - current_action
+
+            if difference > 1:
+
+                for j in range(1, difference):
+
+                    new_row = current_row.copy()
+
+                    new_row["FRAME"] = new_row["FRAME"] + j
+
+                    rows_inserted.append(new_row)
+
+        last_row = df.iloc[[-1]]
+        last_action = int(df["FRAME"].iloc[-1])
+
+        difference = len(self.frames) - last_action
+
+        for i in range(1, difference+1):
+
+            new_row = last_row.copy()
+            new_row["FRAME"] = new_row["FRAME"] + j
+
+            rows_inserted.append(new_row)
+
+
+        df = pd.concat([df] + rows_inserted, ignore_index=True)
+        
+        df = df.set_index("FRAME")
+        df = df.sort_index()
+        df = df.reset_index()
+
+        return df
+
 class Astro(Dataset):
     def __init__(self, frame_gap, frame_dir=None, action_csv=None):
         self.frame_gap = frame_gap
