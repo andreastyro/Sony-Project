@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from torch.utils.data import Subset, DataLoader, random_split
-from frame_dataset import Astro
+from frame_dataset import Astro, Astro_Multi
 from unet import UNet
 from tqdm import tqdm
 
@@ -14,7 +14,6 @@ from torchvision.transforms import ToPILImage
 from torchvision.models import vgg19
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as TF
-
 
 os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 
@@ -64,10 +63,10 @@ class VGGPerceptualLoss(nn.Module):
 
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 21
+frame_gap = 2
 frames = frame_gap - 1
 
-astro = Astro(frame_gap=frame_gap)
+astro = Astro_Multi(frame_gap=frame_gap)
 
 action_dim = astro.action_dimensions
 
