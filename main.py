@@ -20,12 +20,15 @@ os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 to_pil = ToPILImage()
 
 # Load VGG model
-vgg = models.vgg19(pretrained=True).features
-vgg.eval()  # Set to evaluation mode
+#vgg = models.vgg19(pretrained=True).features
+#vgg.eval()  # Set to evaluation mode
 
 # Move model to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-vgg.to(device)
+#vgg.to(device)
+
+
+"""
 
 # Define VGG feature extractor
 class VGGFeatureExtractor(nn.Module):
@@ -61,9 +64,11 @@ class VGGPerceptualLoss(nn.Module):
         loss = self.criterion(gen_features, true_features)
         return loss
 
+"""
+
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 2
+frame_gap = 20
 frames = frame_gap - 1
 
 astro = Astro_Multi(frame_gap=frame_gap)
@@ -77,9 +82,9 @@ test_len   = total_len - train_len - val_len  # remaining 15 %
 
 train_dataset, val_dataset, test_dataset = random_split(astro, [train_len, val_len, test_len])
 
-train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=4, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=4, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=2, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=2, shuffle=True)
 
 # ----------------------------------------------------------------------------------
 
@@ -89,7 +94,7 @@ model = UNet(frames=frames, action_dim=action_dim * 2).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
-perceptual_loss = VGGPerceptualLoss().to(device)
+#perceptual_loss = VGGPerceptualLoss().to(device)
 
 epochs = 25
 
@@ -128,9 +133,9 @@ for epoch in range(epochs):
         y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
         adv_loss = criterion(y_train_frames, y_pred)
-        vgg_loss = perceptual_loss(y_train_frames, y_pred)
+        #vgg_loss = perceptual_loss(y_train_frames, y_pred)
         
-        loss = adv_loss + 0.1 * vgg_loss
+        loss = adv_loss # + 0.1 * vgg_loss
 
         loss.backward()
         optimizer.step()
@@ -167,9 +172,9 @@ for epoch in range(epochs):
             y_pred  = y_pred_seq.reshape(B * T, 3, H, W)
 
             adv_loss = criterion(y_val_frames, y_pred)
-            vgg_loss = perceptual_loss(y_val_frames, y_pred)
+            #vgg_loss = perceptual_loss(y_val_frames, y_pred)
 
-            loss = adv_loss + 0.1 * vgg_loss
+            loss = adv_loss # + 0.1 * vgg_loss
 
             val_loss += loss.item()
 

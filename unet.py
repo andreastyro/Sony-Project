@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 class Block(nn.Sequential):
     def __init__(self, in_channels, out_channels):
@@ -53,8 +54,8 @@ class UNet(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
-        D = 128
-        F = 144
+        D = 128 # Action MLP Channels
+        F = 8040
 
         self.fuse_proj = nn.Linear(in_features=F+D, out_features=F, bias=True)
 
@@ -69,9 +70,13 @@ class UNet(nn.Module):
         # Bottleneck
         b  = self.bottleneck(self.pool(s4))
 
+        #print(b.shape)
+
         B, C, H, W = b.shape
 
         b = b.view(B, C, H * W)
+
+        #print(b.shape)
 
         action_features = self.action_mlp(actions)
 
@@ -79,12 +84,20 @@ class UNet(nn.Module):
 
         fused = torch.cat([b, action_features], dim=-1)
 
+        #print("Fused: ", fused.shape)
+
         fused = self.fuse_proj(fused)
 
         fused = fused.view(B, C, H, W)
 
+        #print("Fused rearranged: ", fused.shape)
+        
         # Decoder + Skip Connections
         up1 = self.transpose1(fused)
+        up1 = F.pad(up1, (0, 0, 0, 1))
+
+        #print("UP1 : ", up1.shape)
+        #print("S4 :", s4.shape)
 
         d1 = self.dec1(torch.cat([up1, s4], dim=1))
 

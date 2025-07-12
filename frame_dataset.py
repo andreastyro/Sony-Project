@@ -34,11 +34,12 @@ class Astro_Multi(Dataset):
 
             frames_dir = self.root_dir / trajectory_id
 
-            self.frames = sorted(glob.glob(f"{frames_dir}/*.png")) # fix this sort, based on number
+            self.frames = sorted(glob.glob(f"{frames_dir}/*.jpg")) # fix this sort, based on number
 
             self.actions_csv = frames_dir / "actions.csv"
 
-            df = pd.read_csv(self.actions_csv)
+            df = pd.read_csv(self.actions_csv, engine='python', on_bad_lines='skip')
+
             self.df = self.process_actions(df)
 
             self.action_dimensions = len(self.df.columns)
@@ -155,7 +156,7 @@ class Astro_Multi(Dataset):
         action_list = []
         
         first_frame = cv2.cvtColor(cv2.imread(frames[start_frame_idx]), cv2.COLOR_BGR2RGB)
-        first_action = self.df.iloc[start_frame_idx]
+        first_action = actions_df.iloc[start_frame_idx]
 
         first_frame = torch.tensor(first_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
         first_action = torch.tensor(first_action.values, dtype=torch.float32)
@@ -172,7 +173,7 @@ class Astro_Multi(Dataset):
             action_list.append(new_action)
 
         last_frame = cv2.cvtColor(cv2.imread(frames[start_frame_idx + self.frame_gap]), cv2.COLOR_BGR2RGB)
-        last_action = self.df.iloc[start_frame_idx + self.frame_gap]
+        last_action = actions_df.iloc[start_frame_idx + self.frame_gap]
 
         last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
         last_action = torch.tensor(last_action.values, dtype=torch.float32)
