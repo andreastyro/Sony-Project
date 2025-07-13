@@ -34,25 +34,25 @@ class Astro_Multi(Dataset):
 
             frames_dir = self.root_dir / trajectory_id
 
-            self.frames = sorted(glob.glob(f"{frames_dir}/*.jpg")) # fix this sort, based on number
+            frames = sorted(glob.glob(f"{frames_dir}/*.jpg")) # fix this sort, based on number
 
             self.actions_csv = frames_dir / "actions.csv"
 
             df = pd.read_csv(self.actions_csv, engine='python', on_bad_lines='skip')
 
-            self.df = self.process_actions(df)
+            num_frames = len(frames)
+
+            self.df = self.process_actions(df, num_frames)
 
             self.action_dimensions = len(self.df.columns)
 
-            num_frames = len(self.frames)
-
-            num_windows = ((num_frames - self.frame_gap) // self.frame_gap) + 1
+            num_windows = ((num_frames - self.frame_gap) // self.frame_gap) 
 
             self.cumulative_windows += num_windows
 
             self.lookup_table[self.cumulative_windows] = {
                 'trajectory_id': trajectory_id,
-                'frames': self.frames,
+                'frames': frames.copy(),
                 'actions_df': self.df,
                 'num_frames': num_frames,
                 'num_windows': num_windows,
@@ -61,67 +61,23 @@ class Astro_Multi(Dataset):
 
             starting_index = self.cumulative_windows
 
-    def process_actions(self, df):
+    def process_actions(self, df, num_frames):
 
         df["FRAME"] = (df["TIMESTAMP"] // (1000/60))
 
-        # Insert rows before first action
+        neutral_cols = ["LSTICKX", "LSTICKY", "RSTICKX", "RSTICKY"]
 
-        first_row = df.iloc[[0]]
-        first_action = int(df["FRAME"].iloc[0])
+        df = (
+            df.sort_values("FRAME")             # order by frame
+            .drop_duplicates("FRAME", keep="first")
+            .set_index("FRAME")                 # FRAME becomes the index
+            .reindex(range(1, num_frames+1))    # create every row 0 … num_frames-1
+            .ffill()                            # forward-fill missing rows
+            .reset_index()                      # move index back to column "FRAME"
+        )
 
-        first_row.loc[:, ["LSTICKX", "LSTICKY", "RSTICKX", "RSTICKY"]] = 127
-
-        rows_inserted = []
-
-        for i in range(1, first_action):
-
-            custom_row = first_row.copy()
-
-            custom_row["FRAME"] = i
-            rows_inserted.append(custom_row)
-
-        # Insert Rows in between action gaps
-        
-        for i in range(len(df) - 1):
-
-            current_row = df.iloc[[i]].copy()
-
-            current_action = int(current_row["FRAME"].values[0])
-            next_action = int(df["FRAME"].iloc[i+1])
-
-            if current_action == next_action:
-                df.iloc[i+1, df.columns.get_loc("FRAME")] = next_action + 1 # Eliminates Rounding duplication of frame numbers
-
-            difference = next_action - current_action
-
-            if difference > 1:
-
-                for j in range(1, difference):
-
-                    new_row = current_row.copy()
-
-                    new_row["FRAME"] = new_row["FRAME"] + j
-
-                    rows_inserted.append(new_row)
-
-        last_row = df.iloc[[-1]]
-        last_action = int(df["FRAME"].iloc[-1])
-
-        difference = len(self.frames) - last_action
-
-        for i in range(1, difference+1):
-            
-            new_row = last_row.copy()
-            new_row["FRAME"] = new_row["FRAME"] + i
-
-            rows_inserted.append(new_row)
-
-        df = pd.concat([df] + rows_inserted, ignore_index=True)
-
-        df = df.set_index("FRAME")
-        df = df.sort_index()
-        df = df.reset_index()
+        df[neutral_cols] = df[neutral_cols].fillna(127)
+        df = df.fillna(0)
 
         return df
     
@@ -136,7 +92,7 @@ class Astro_Multi(Dataset):
 
         lookup_key = None
         for i in self.lookup_table.keys():
-            if i > idx:
+            if i >= idx:
                 lookup_key = i
                 
                 break
@@ -151,6 +107,8 @@ class Astro_Multi(Dataset):
         local_idx = idx - starting_index
 
         start_frame_idx = local_idx * self.frame_gap
+
+        #print("Start Frame Index: ", start_frame_idx, "Local Index: ", local_idx, "Starting Index: ", starting_index, "Frames: ", len(frames), "Actions: \n", actions_df)
 
         frame_list = []
         action_list = []
