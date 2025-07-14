@@ -17,58 +17,18 @@ import torchvision.transforms.functional as TF
 
 os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 
-to_pil = ToPILImage()
+checkpoint_dir = Path(__file__).resolve().parent.parent / "Checkpoints"
+checkpoint_file = checkpoint_dir / "latest.pt"
+os.makedirs(checkpoint_dir, exist_ok=True)
 
-# Load VGG model
-#vgg = models.vgg19(pretrained=True).features
-#vgg.eval()  # Set to evaluation mode
+to_pil = ToPILImage()
 
 # Move model to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#vgg.to(device)
-
-
-"""
-
-# Define VGG feature extractor
-class VGGFeatureExtractor(nn.Module):
-    def __init__(self, vgg, layers=3):  # Extract up to the first 7 layers
-        super(VGGFeatureExtractor, self).__init__()
-        self.vgg = nn.Sequential(*list(vgg[:layers]))  # Extract layers
-
-    def forward(self, x):
-        return self.vgg(x)
-
-# Initialize the VGG feature extractor
-vgg_features = VGGFeatureExtractor(vgg, layers=7).to(device)
-
-# Define VGG loss
-class VGGPerceptualLoss(nn.Module): 
-    def __init__(self):
-        super(VGGPerceptualLoss, self).__init__()
-        self.criterion = nn.MSELoss()
-        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device) # Source for values: https://gist.github.com/alper111/8233cdb0414b4cb5853f2f730ab95a49?permalink_comment_id=4423554
-        self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
-
-    def forward(self, truth_frame, gen_frame):
-
-        # Normalize input
-        gen_frame = (gen_frame - self.mean) / self.std
-        truth_frame = (truth_frame - self.mean) / self.std
-
-        # Compute feature maps using VGG
-        gen_features = vgg_features(gen_frame)
-        true_features = vgg_features(truth_frame)
-
-        # Compute loss
-        loss = self.criterion(gen_features, true_features)
-        return loss
-
-"""
 
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 20
+frame_gap = 21
 frames = frame_gap - 1
 
 astro = Astro_Multi(frame_gap=frame_gap)
@@ -94,9 +54,12 @@ model = UNet(frames=frames, action_dim=action_dim * 2).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
-#perceptual_loss = VGGPerceptualLoss().to(device)
 
+start_epoch = 0
 epochs = 25
+
+avg_train_loss = 0
+avg_val_loss = 0
 
 train_loss = 0
 val_loss = 0
@@ -104,7 +67,17 @@ val_loss = 0
 train_losses = []
 val_losses = []
 
-for epoch in range(epochs):
+if checkpoint_file.exists():
+    checkpoint = torch.load(checkpoint_file, map_location="cpu")
+
+    print(checkpoint)
+
+    model.load_state_dict(checkpoint["model"])
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    start_epoch = checkpoint["epoch"] + 1
+    print(f"Resumed from epoch {start_epoch}")
+
+for epoch in range(start_epoch, epochs):
 
     train_loss = 0
     val_loss = 0
@@ -133,18 +106,19 @@ for epoch in range(epochs):
         y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
         adv_loss = criterion(y_train_frames, y_pred)
-        #vgg_loss = perceptual_loss(y_train_frames, y_pred)
         
-        loss = adv_loss # + 0.1 * vgg_loss
+        loss = adv_loss
 
         loss.backward()
         optimizer.step()
 
         train_loss += loss.item()
 
-    train_losses.append(train_loss)
+    avg_train_loss = train_loss / len(train_loader)
+    
+    train_losses.append(avg_train_loss)
 
-    print(train_loss/len(train_loader))
+    print(f"Train Loss at epoch {epoch+1} :", avg_train_loss)
 
     with torch.no_grad():
         
@@ -172,15 +146,18 @@ for epoch in range(epochs):
             y_pred  = y_pred_seq.reshape(B * T, 3, H, W)
 
             adv_loss = criterion(y_val_frames, y_pred)
-            #vgg_loss = perceptual_loss(y_val_frames, y_pred)
 
-            loss = adv_loss # + 0.1 * vgg_loss
+            loss = adv_loss
 
             val_loss += loss.item()
 
-        val_losses.append(val_loss)
+    avg_val_loss = val_loss / len(val_loader)
 
-    print(val_loss/len(val_loader))
+    val_losses.append(avg_val_loss)
+
+    print(avg_val_loss)
+
+    torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": optimizer.state_dict(), "train_loss": avg_train_loss, "val_loss": avg_val_loss}, checkpoint_file)
 
     # ----------------- save a middle predicted frame ------------------
     mid_idx = T // 2                         # middle frame index
