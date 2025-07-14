@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from torch.utils.data import Subset, DataLoader, random_split
 from frame_dataset import Astro, Astro_Multi
+from torch.cuda.amp import GradScaler, autocast
 from unet import UNet
 from tqdm import tqdm
 
@@ -42,11 +43,13 @@ test_len   = total_len - train_len - val_len  # remaining 15 %
 
 train_dataset, val_dataset, test_dataset = random_split(astro, [train_len, val_len, test_len])
 
-train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=2, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=2, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, pin_memory=True)
 
 # ----------------------------------------------------------------------------------
+
+scaler = GradScaler()
 
 learning_rate = 1e-4
 
@@ -90,27 +93,31 @@ for epoch in range(start_epoch, epochs):
         #B, T, C, H, W = y_train.shape
         #y_train = y_train.view(B * T, C, H, W) # Reduce 5 dimensions to 4
 
-        x_train_frames = x_train_frames.to(device)
-        x_train_actions = x_train_actions.to(device)
-        y_train_frames = y_train_frames.to(device)
-        y_train_actions = y_train_actions.to(device)
+        x_train_frames = x_train_frames.to(device, non_blocking=True)
+        x_train_actions = x_train_actions.to(device, non_blocking=True)
+        y_train_frames = y_train_frames.to(device, non_blocking=True)
+        y_train_actions = y_train_actions.to(device, non_blocking=True)
 
         optimizer.zero_grad()
 
-        y_pred = model(x_train_frames, x_train_actions)
+        with autocast():
 
-        B, C, H, W = y_pred.shape
-        T = C // 3
+            y_pred = model(x_train_frames, x_train_actions)
 
-        y_train_frames = y_train_frames.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
-        y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+            B, C, H, W = y_pred.shape
+            T = C // 3
 
-        adv_loss = criterion(y_train_frames, y_pred)
+            y_train_frames = y_train_frames.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+            y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
+
+            adv_loss = criterion(y_train_frames, y_pred)
         
+
         loss = adv_loss
 
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         train_loss += loss.item()
 
@@ -126,26 +133,28 @@ for epoch in range(start_epoch, epochs):
 
         for (x_val_frames, x_val_actions), (y_val_frames, y_val_actions) in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
 
-            x_val_frames = x_val_frames.to(device)
-            x_val_actions = x_val_actions.to(device)
-            y_val_frames = y_val_frames.to(device)
-            y_val_actions = y_val_actions.to(device)
+            x_val_frames = x_val_frames.to(device, non_blocking=True)
+            x_val_actions = x_val_actions.to(device, non_blocking=True)
+            y_val_frames = y_val_frames.to(device, non_blocking=True)
+            y_val_actions = y_val_actions.to(device, non_blocking=True)
 
             #print(y_val.shape)
             #print(y_pred.shape)
 
-            y_pred = model(x_val_frames, x_val_actions)
+            with autocast():
 
-            B, C, H, W = y_pred.shape
-            T = C // 3
+                y_pred = model(x_val_frames, x_val_actions)
 
-            y_val_seq = y_val_frames.view(B, T, 3, H, W)
-            y_pred_seq = y_pred.view(B, T, 3, H, W)
+                B, C, H, W = y_pred.shape
+                T = C // 3
 
-            y_val_frames = y_val_seq.reshape(B * T, 3, H, W)
-            y_pred  = y_pred_seq.reshape(B * T, 3, H, W)
+                y_val_seq = y_val_frames.view(B, T, 3, H, W)
+                y_pred_seq = y_pred.view(B, T, 3, H, W)
 
-            adv_loss = criterion(y_val_frames, y_pred)
+                y_val_frames = y_val_seq.reshape(B * T, 3, H, W)
+                y_pred  = y_pred_seq.reshape(B * T, 3, H, W)
+
+                adv_loss = criterion(y_val_frames, y_pred)
 
             loss = adv_loss
 
@@ -168,8 +177,8 @@ for epoch in range(start_epoch, epochs):
     fig_seq, axs_seq = plt.subplots(2, T, figsize=(3*T, 6), squeeze=False)
 
     for t in range(T):
-        gt   = y_val_seq[0, t].detach().cpu().clamp(0, 1)
-        pred = y_pred_seq[0, t].detach().cpu().clamp(0, 1)
+        gt   = y_val_seq[5, t].detach().cpu().clamp(0, 1)
+        pred = y_pred_seq[5, t].detach().cpu().clamp(0, 1)
 
         axs_seq[0, t].imshow(TF.to_pil_image(gt))
         axs_seq[0, t].set_title(f"GT t{t+1}")

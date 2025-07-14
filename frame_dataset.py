@@ -46,11 +46,15 @@ class Astro_Multi(Dataset):
 
             self.action_dimensions = len(self.df.columns)
 
-            num_windows = ((num_frames - self.frame_gap) // self.frame_gap) 
+
+            window_len = self.frame_gap + 1
+            max_start = num_frames - window_len
+            num_windows = max_start // self.frame_gap + 1
+            end_index = starting_index + num_windows - 1   # inclusive upper bound
 
             self.cumulative_windows += num_windows
 
-            self.lookup_table[self.cumulative_windows] = {
+            self.lookup_table[end_index] = {
                 'trajectory_id': trajectory_id,
                 'frames': frames.copy(),
                 'actions_df': self.df,
@@ -59,8 +63,9 @@ class Astro_Multi(Dataset):
                 'starting_index': starting_index
             }
 
-            starting_index = self.cumulative_windows
-
+            starting_index = end_index + 1                 # next traj starts here
+            self.cumulative_windows = end_index + 1        # dataset length so far
+            
     def process_actions(self, df, num_frames):
 
         df["FRAME"] = (df["TIMESTAMP"] // (1000/60))
@@ -80,7 +85,8 @@ class Astro_Multi(Dataset):
         df = df.fillna(0)
 
         return df
-    
+
+        
     def __len__(self):
 
         return self.cumulative_windows
@@ -109,11 +115,17 @@ class Astro_Multi(Dataset):
         start_frame_idx = local_idx * self.frame_gap
 
         #print("Start Frame Index: ", start_frame_idx, "Local Index: ", local_idx, "Starting Index: ", starting_index, "Frames: ", len(frames), "Actions: \n", actions_df)
-
+        
         frame_list = []
         action_list = []
-        
-        first_frame = cv2.cvtColor(cv2.imread(frames[start_frame_idx]), cv2.COLOR_BGR2RGB)
+
+        def _imread_rgb(path: str):
+            img = cv2.imread(path)
+            if img is None:
+                raise FileNotFoundError(f"Could not read image: {path}")
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        first_frame = _imread_rgb(frames[start_frame_idx])
         first_action = actions_df.iloc[start_frame_idx]
 
         first_frame = torch.tensor(first_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
@@ -121,7 +133,7 @@ class Astro_Multi(Dataset):
 
         for frame in range(1, self.frame_gap):
 
-            new_frame = cv2.cvtColor(cv2.imread(frames[start_frame_idx + frame]), cv2.COLOR_BGR2RGB)
+            new_frame = _imread_rgb(frames[start_frame_idx + frame])
             new_action = actions_df.iloc[start_frame_idx + frame]
 
             new_frame = torch.tensor(new_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
@@ -130,7 +142,7 @@ class Astro_Multi(Dataset):
             frame_list.append(new_frame)
             action_list.append(new_action)
 
-        last_frame = cv2.cvtColor(cv2.imread(frames[start_frame_idx + self.frame_gap]), cv2.COLOR_BGR2RGB)
+        last_frame = _imread_rgb(frames[start_frame_idx + self.frame_gap])
         last_action = actions_df.iloc[start_frame_idx + self.frame_gap]
 
         last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
