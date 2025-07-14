@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from torch.utils.data import Subset, DataLoader, random_split
-from frame_dataset import Astro, Astro_Multi
+from frame_dataset import Astro_Multi
 from torch.cuda.amp import GradScaler, autocast
 from unet import UNet
 from tqdm import tqdm
@@ -29,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 21
+frame_gap = 4
 frames = frame_gap - 1
 
 astro = Astro_Multi(frame_gap=frame_gap)
@@ -53,7 +53,7 @@ scaler = GradScaler()
 
 learning_rate = 1e-4
 
-model = UNet(frames=frames, action_dim=action_dim * 2).to(device)
+model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1)).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
@@ -87,7 +87,7 @@ for epoch in range(start_epoch, epochs):
 
     model.train()
 
-    for (x_train_frames, x_train_actions), (y_train_frames, y_train_actions) in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
+    for (x_train_frames, x_train_actions), y_train_frames in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
         #print("y_train shape:", y_train.shape)
 
         #B, T, C, H, W = y_train.shape
@@ -96,7 +96,6 @@ for epoch in range(start_epoch, epochs):
         x_train_frames = x_train_frames.to(device, non_blocking=True)
         x_train_actions = x_train_actions.to(device, non_blocking=True)
         y_train_frames = y_train_frames.to(device, non_blocking=True)
-        y_train_actions = y_train_actions.to(device, non_blocking=True)
 
         optimizer.zero_grad()
 
@@ -111,7 +110,6 @@ for epoch in range(start_epoch, epochs):
             y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
             adv_loss = criterion(y_train_frames, y_pred)
-        
 
         loss = adv_loss
 
@@ -131,12 +129,11 @@ for epoch in range(start_epoch, epochs):
         
         model.eval()
 
-        for (x_val_frames, x_val_actions), (y_val_frames, y_val_actions) in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
+        for (x_val_frames, x_val_actions), y_val_frames in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
 
             x_val_frames = x_val_frames.to(device, non_blocking=True)
             x_val_actions = x_val_actions.to(device, non_blocking=True)
             y_val_frames = y_val_frames.to(device, non_blocking=True)
-            y_val_actions = y_val_actions.to(device, non_blocking=True)
 
             #print(y_val.shape)
             #print(y_pred.shape)
