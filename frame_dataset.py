@@ -83,6 +83,8 @@ class Astro_Multi(Dataset):
 
         df[neutral_cols] = df[neutral_cols].fillna(127)
         df = df.fillna(0)
+        cols_to_remove = ["FRAME", "VFRAME_ID", "TIMESTAMP", "TOUCHPOINT0_ID", "TOUCHPOINT0_X", "TOUCHPOINT0_y","TOUCHPOINT1_ID","TOUCHPOINT1_X", "TOUCHPOINT1_y"]
+        df = df.drop(columns=cols_to_remove)
 
         return df
 
