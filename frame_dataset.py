@@ -7,14 +7,14 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-class Astro_Multi(Dataset):
-    def __init__(self, frame_gap, mode, root_dir=None):
+class Frame_Dataset(Dataset):
+    def __init__(self, frame_gap, mode, game):
 
-        if root_dir==None:
+        if game == "astro":
             self.root_dir = Path(__file__).resolve().parent.parent / "Data" / "extracted_frames"
 
-        else:
-            self.root_dir = Path(root_dir)
+        elif game== "tlou":
+            self.root_dir = Path("/scratch/uceeaty/Data/The Last of Us Part 2/High Contrast/No Return/HC Off") 
 
         self.frame_gap = frame_gap
         self.mode = mode

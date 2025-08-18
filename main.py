@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from torch.utils.data import Subset, DataLoader, random_split
-from frame_dataset import Astro_Multi
+from frame_dataset import Frame_Dataset
 from torch.cuda.amp import GradScaler, autocast
 from unet import UNet
 from tqdm import tqdm
@@ -30,20 +30,21 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # -------------------------------- Split Dataset -----------------------------------
 
 mode = "predict"
+game = "tlou"
 
 frame_gap = 5
 frames = frame_gap - 1
 
-astro = Astro_Multi(frame_gap=frame_gap, mode=mode)
+dataset = Frame_Dataset(frame_gap=frame_gap, mode=mode, game=game)
 
-action_dim = astro.action_dimensions
+action_dim = dataset.action_dimensions
 
-total_len  = len(astro)
+total_len  = len(dataset)
 train_len  = int(0.70 * total_len)          # 70 %
 val_len    = int(0.15 * total_len)          # 15 %
 test_len   = total_len - train_len - val_len  # remaining 15 %
 
-train_dataset, val_dataset, test_dataset = random_split(astro, [train_len, val_len, test_len])
+train_dataset, val_dataset, test_dataset = random_split(dataset, [train_len, val_len, test_len])
 
 train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False)
