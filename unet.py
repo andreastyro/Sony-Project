@@ -15,7 +15,7 @@ class Block(nn.Sequential):
 
 class UNet(nn.Module):
 
-    def __init__(self, frames, action_dim, mode):
+    def __init__(self, frames, action_dim, mode, stochastic, noise_sigma):
         super(UNet, self).__init__() # "Connects" class to parent/super class (nn.Module) - Unet is now an object of nn.module
 
         self.action_mlp = nn.Sequential(
@@ -25,13 +25,15 @@ class UNet(nn.Module):
             nn.ReLU()
         )
 
-        if mode == "interpolate":
-            self.enc1 = Block(6, 64)
+        self.mode = mode
+        self.stochastic = stochastic
+        self.noise_sigma = noise_sigma
 
-        elif mode == "predict":
-            self.enc1 = Block(3, 64)
-            
+        base_in = 6 if self.mode=="interpolate" else 3
+        frame_in_channels = base_in + (1 if stochastic else 0)
+
         # Contracting path
+        self.enc1 = Block(frame_in_channels, 64)
         self.enc2 = Block(64, 128)
         self.enc3 = Block(128, 256)
         self.enc4 = Block(256, 512)
@@ -64,7 +66,17 @@ class UNet(nn.Module):
 
         self.fuse_proj = nn.Linear(in_features=F+D, out_features=F, bias=True)
 
+    def add_noise(self, x, sigma):
+        
+        B, _, H, W = x.shape
+        return sigma * torch.randn(B, 1, H, W, device=x.device, dtype=x.dtype)
+
     def forward(self, frames, actions):
+
+        if self.stochastic==True:
+            
+            noise = self.add_noise(frames, self.noise_sigma)
+            frames = torch.cat([frames, noise], dim=1)
 
         # Encoder
         s1 = self.enc1(frames)

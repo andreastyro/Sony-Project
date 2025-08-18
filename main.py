@@ -32,6 +32,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mode = "predict"
 game = "tlou"
 
+
 frame_gap = 5
 frames = frame_gap - 1
 
@@ -54,7 +55,7 @@ test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
 
 learning_rate = 1e-4
 
-model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode).to(device)
+model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode, stochastic=True, noise_sigma=0.1).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
