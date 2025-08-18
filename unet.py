@@ -15,8 +15,8 @@ class Block(nn.Sequential):
 
 class UNet(nn.Module):
 
-    def __init__(self, frames, action_dim):
-        super(UNet, self).__init__()
+    def __init__(self, frames, action_dim, mode):
+        super(UNet, self).__init__() # "Connects" class to parent/super class (nn.Module) - Unet is now an object of nn.module
 
         self.action_mlp = nn.Sequential(
             nn.Linear(action_dim, 64),
@@ -25,8 +25,13 @@ class UNet(nn.Module):
             nn.ReLU()
         )
 
+        if mode == "interpolate":
+            self.enc1 = Block(6, 64)
+
+        elif mode == "predict":
+            self.enc1 = Block(3, 64)
+            
         # Contracting path
-        self.enc1 = Block(6, 64)
         self.enc2 = Block(64, 128)
         self.enc3 = Block(128, 256)
         self.enc4 = Block(256, 512)
@@ -55,7 +60,7 @@ class UNet(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
         D = 128 # Action MLP Channels
-        F = 8040
+        F = 8040 # H * W
 
         self.fuse_proj = nn.Linear(in_features=F+D, out_features=F, bias=True)
 
@@ -73,6 +78,8 @@ class UNet(nn.Module):
         #print(b.shape)
 
         B, C, H, W = b.shape
+
+        print(b.shape)
 
         b = b.view(B, C, H * W)
 
@@ -94,7 +101,7 @@ class UNet(nn.Module):
         
         # Decoder + Skip Connections
         up1 = self.transpose1(fused)
-        up1 = F.pad(up1, (0, 0, 0, 1))
+        up1 = F.pad(up1, (0, 0, 0, 1)) # From 134 to 135
 
         #print("UP1 : ", up1.shape)
         #print("S4 :", s4.shape)

@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 
 class Astro_Multi(Dataset):
-    def __init__(self, frame_gap, root_dir=None):
+    def __init__(self, frame_gap, mode, root_dir=None):
 
         if root_dir==None:
             self.root_dir = Path(__file__).resolve().parent.parent / "Data" / "extracted_frames"
@@ -17,6 +17,7 @@ class Astro_Multi(Dataset):
             self.root_dir = Path(root_dir)
 
         self.frame_gap = frame_gap
+        self.mode = mode
         
         self.trajectory_dir = [d for d in self.root_dir.iterdir() if d.is_dir()]
         self.trajectory_ids = [d.name for d in self.trajectory_dir]
@@ -87,7 +88,6 @@ class Astro_Multi(Dataset):
         df = df.drop(columns=cols_to_remove)
 
         return df
-
         
     def __len__(self):
 
@@ -132,17 +132,20 @@ class Astro_Multi(Dataset):
 
         frame_list = [
             torch.tensor(
-                _imread_rgb(frames[start_frame_idx + frame]) / 255.0, 
+                _imread_rgb(frames[start_frame_idx + i]) / 255.0, 
                 dtype=torch.float32
                 ).permute(2, 0, 1) 
-                for frame in range(1, self.frame_gap)
+                for i in range(1, self.frame_gap)
         ]
 
-        last_frame = _imread_rgb(frames[start_frame_idx + self.frame_gap])
-        last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
+        if self.mode == "interpolate":
 
-        frame_pair = torch.cat([first_frame, last_frame], dim=0)
-        frame_list = torch.cat(frame_list, dim=0)
+            last_frame = _imread_rgb(frames[start_frame_idx + self.frame_gap])
+            last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
+
+            frame_pair = torch.cat([first_frame, last_frame], dim=0)
+
+        frame_list = torch.stack(frame_list, dim=0)
 
         action_list = [
             torch.tensor(actions_df.iloc[i].values, dtype=torch.float32) 
@@ -151,4 +154,10 @@ class Astro_Multi(Dataset):
         
         action_list = torch.cat(action_list, dim=0)
 
-        return (frame_pair, action_list), frame_list
+        if self.mode == "interpolate":
+
+            return (frame_pair, action_list), frame_list
+        
+        else:
+            
+            return (first_frame, action_list), frame_list

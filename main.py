@@ -29,10 +29,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # -------------------------------- Split Dataset -----------------------------------
 
-frame_gap = 21
+mode = "predict"
+
+frame_gap = 5
 frames = frame_gap - 1
 
-astro = Astro_Multi(frame_gap=frame_gap)
+astro = Astro_Multi(frame_gap=frame_gap, mode=mode)
 
 action_dim = astro.action_dimensions
 
@@ -43,23 +45,21 @@ test_len   = total_len - train_len - val_len  # remaining 15 %
 
 train_dataset, val_dataset, test_dataset = random_split(astro, [train_len, val_len, test_len])
 
-train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, pin_memory=True)
+train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
 
 # ----------------------------------------------------------------------------------
 
-scaler = GradScaler(init_scale=2**16)
-
 learning_rate = 1e-4
 
-model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1)).to(device)
+model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
 
 start_epoch = 0
-epochs = 25
+epochs = 10
 
 avg_train_loss = 0
 avg_val_loss = 0
@@ -70,6 +70,10 @@ val_loss = 0
 train_losses = []
 val_losses = []
 
+checkpoint = False
+
+"""
+
 if checkpoint_file.exists():
     checkpoint = torch.load(checkpoint_file, map_location="cpu")
 
@@ -79,7 +83,7 @@ if checkpoint_file.exists():
     optimizer.load_state_dict(checkpoint["optimizer"])
     start_epoch = checkpoint["epoch"] + 1
     print(f"Resumed from epoch {start_epoch}")
-
+"""
 for epoch in range(start_epoch, epochs):
 
     train_loss = 0
@@ -93,9 +97,9 @@ for epoch in range(start_epoch, epochs):
         #B, T, C, H, W = y_train.shape
         #y_train = y_train.view(B * T, C, H, W) # Reduce 5 dimensions to 4
 
-        x_train_frames = x_train_frames.to(device, non_blocking=True)
-        x_train_actions = x_train_actions.to(device, non_blocking=True)
-        y_train_frames = y_train_frames.to(device, non_blocking=True)
+        x_train_frames = x_train_frames.to(device)
+        x_train_actions = x_train_actions.to(device)
+        y_train_frames = y_train_frames.to(device)
 
         optimizer.zero_grad()
 
@@ -128,9 +132,9 @@ for epoch in range(start_epoch, epochs):
 
         for (x_val_frames, x_val_actions), y_val_frames in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
 
-            x_val_frames = x_val_frames.to(device, non_blocking=True)
-            x_val_actions = x_val_actions.to(device, non_blocking=True)
-            y_val_frames = y_val_frames.to(device, non_blocking=True)
+            x_val_frames = x_val_frames.to(device)
+            x_val_actions = x_val_actions.to(device)
+            y_val_frames = y_val_frames.to(device)
 
             #print(y_val.shape)
             #print(y_pred.shape)
@@ -158,7 +162,9 @@ for epoch in range(start_epoch, epochs):
 
     print(avg_val_loss)
 
-    torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": optimizer.state_dict(), "train_loss": avg_train_loss, "val_loss": avg_val_loss}, checkpoint_file)
+    if checkpoint == True:
+
+        torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": optimizer.state_dict(), "train_loss": avg_train_loss, "val_loss": avg_val_loss}, checkpoint_file)
 
     # ----------------- plot full sequence grid for first sample -------
     fig_seq, axs_seq = plt.subplots(2, T, figsize=(3*T, 6), squeeze=False)
@@ -177,5 +183,6 @@ for epoch in range(start_epoch, epochs):
         axs_seq[1, t].axis("off")
         
     plt.tight_layout()
-    plt.savefig("sequence_grid.png")
+    plt.savefig(f"sequence_grid_{epoch}.png")
     plt.close(fig_seq)
+
