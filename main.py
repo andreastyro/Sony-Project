@@ -4,6 +4,7 @@ from torch.utils.data import Subset, DataLoader, random_split
 from frame_dataset import Frame_Dataset
 from torch.cuda.amp import GradScaler, autocast
 from unet import UNet
+from unet_lite import UNet_Lite
 from tqdm import tqdm
 
 import torch
@@ -20,7 +21,6 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 
 checkpoint_dir = Path(__file__).resolve().parent.parent / "Checkpoints"
-checkpoint_file = checkpoint_dir / "latest.pt"
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,11 +33,51 @@ to_pil = ToPILImage()
 # Move model to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+class VGGFeatureExtractor(nn.Module):
+    def __init__(self, vgg, layer=8):
+        super(VGGFeatureExtractor, self).__init__()
+        self.features = vgg.features[:layer+1]  # Extract up to specified layer
+        
+        # Freeze parameters to save memory and computation
+        for param in self.features.parameters():
+            param.requires_grad = False
+
+    def forward(self, x):
+        return self.features(x)
+
+# Define VGG loss
+class VGGPerceptualLoss(nn.Module): 
+    def __init__(self, layer=8):
+        super(VGGPerceptualLoss, self).__init__()
+        
+        # Load VGG16 once and extract features
+        vgg = models.vgg16(pretrained=True)
+        self.vgg_features = VGGFeatureExtractor(vgg, layer=layer)
+        
+        # Store normalization as buffers (more efficient than creating tensors each time)
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        
+        self.criterion = nn.MSELoss()
+
+    def forward(self, gen_out, hr_images):
+        # Normalize inputs (now using buffers, no device issues)
+        gen_out = (gen_out - self.mean) / self.std
+        hr_images = (hr_images - self.mean) / self.std
+
+        # Compute feature maps using VGG
+        gen_features = self.vgg_features(gen_out)
+        hr_features = self.vgg_features(hr_images)
+
+        # Compute loss
+        loss = self.criterion(gen_features, hr_features)
+        return loss
+
 # -------------------------------- Split Dataset -----------------------------------
 
+stochastic = True
 mode = "predict"
 game = "tlou"
-
 
 frame_gap = 5
 frames = frame_gap - 1
@@ -57,15 +97,16 @@ train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
 
+
 # ----------------------------------------------------------------------------------
 
 learning_rate = 1e-4
 
-model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode, stochastic=True, noise_sigma=0.1).to(device)
+model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode, stochastic=stochastic, noise_sigma=0.1).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
-
+vgg_loss = VGGPerceptualLoss().to(device)
 psnr = PeakSignalNoiseRatio().to(device)
 ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
 
@@ -77,6 +118,7 @@ avg_val_loss = 0
 
 train_loss = 0
 val_loss = 0
+test_loss = 0
 
 train_losses = []
 val_losses = []
@@ -88,9 +130,9 @@ train_ssim = []
 val_ssim = []
 
 checkpoint = False
+checkpoint_file = checkpoint_dir / f"checkpoint_LR_{learning_rate}_{mode}_{game}.pt"
 
 """
-
 if checkpoint_file.exists():
     checkpoint = torch.load(checkpoint_file, map_location="cpu")
 
@@ -100,6 +142,7 @@ if checkpoint_file.exists():
     optimizer.load_state_dict(checkpoint["optimizer"])
     start_epoch = checkpoint["epoch"] + 1
     print(f"Resumed from epoch {start_epoch}")
+
 """
 for epoch in range(start_epoch, epochs):
 
@@ -132,8 +175,9 @@ for epoch in range(start_epoch, epochs):
         y_pred  = y_pred.view(B, T, 3, H, W).reshape(B * T, 3, H, W)
 
         adv_loss = criterion(y_train_frames, y_pred)
+        perceptual_loss = vgg_loss(y_pred, y_train_frames)
 
-        loss = adv_loss
+        loss = adv_loss * 0.1 + perceptual_loss
 
         loss.backward()
         optimizer.step()
@@ -185,8 +229,9 @@ for epoch in range(start_epoch, epochs):
             y_pred  = y_pred_seq.reshape(B * T, 3, H, W)
 
             adv_loss = criterion(y_val_frames, y_pred)
+            perceptual_loss = vgg_loss(y_pred, y_val_frames)
 
-            loss = adv_loss
+            loss = adv_loss * 0.1 + perceptual_loss
 
             val_loss += loss.item()
 
@@ -231,18 +276,27 @@ for epoch in range(start_epoch, epochs):
         y_pred = y_pred_seq.reshape(B * T, 3, H, W)
 
         adv_loss = criterion(y_test_frames, y_pred)
+        perceptual_loss = vgg_loss(y_pred, y_test_frames)
 
-        loss = adv_loss
+        loss = adv_loss * 0.1 + perceptual_loss
 
         test_loss += loss.item()
 
-    avg_test_loss = test_loss / len(test_loader)
+        psnr_score = psnr(y_pred, y_test_frames)
+        psnr_value += psnr_score.item()
 
-    print(f"Test Loss: ", avg_test_loss)
+        ssim_score = ssim(y_pred, y_test_frames)
+        ssim_value += ssim_score.item()
+
+    avg_test_loss = test_loss / len(test_loader)
+    avg_test_psnr = psnr_value / len(test_loader)
+    avg_test_ssim = ssim_value / len(test_loader)
+
+    print(f"Testing Epoch | MSE Loss: ", avg_test_loss, " | PSNR: ", avg_test_psnr,  " | SSIM: ", avg_test_ssim)
 
     # ---------------------- Plots, Graphs, Curves ---------------------
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     # Loss subplot
     axes[0].plot(range(1, epochs + 1), train_losses, label="Train Loss")
@@ -271,7 +325,7 @@ for epoch in range(start_epoch, epochs):
     axes[2].legend(loc="lower right")
 
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"Plots_LR_{learning_rate}_{mode}_{game}.png"))
+    plt.savefig(os.path.join(save_dir, f"Plots_LR_{learning_rate}_{mode}_{game}_{"stochastic" if stochastic else "determnistic"}.png"))
 
     # ----------------- plot full sequence grid for first sample -------
     fig_seq, axs_seq = plt.subplots(2, T, figsize=(3*T, 6), squeeze=False)
@@ -290,6 +344,5 @@ for epoch in range(start_epoch, epochs):
         axs_seq[1, t].axis("off")
         
     plt.tight_layout()
-    plt.savefig(f"sequence_grid_{epoch}_{learning_rate}_{mode}_{game}.png")
+    plt.savefig(f"sequence_grid_{epoch}_{learning_rate}_{mode}_{game}_{"stochastic" if stochastic else "deterministic"}.png")
     plt.close(fig_seq)
-

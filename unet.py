@@ -91,8 +91,6 @@ class UNet(nn.Module):
 
         B, C, H, W = b.shape
 
-        print(b.shape)
-
         b = b.view(B, C, H * W)
 
         #print(b.shape)
