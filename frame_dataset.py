@@ -14,7 +14,7 @@ class Frame_Dataset(Dataset):
             self.root_dir = Path(__file__).resolve().parent.parent / "Data" / "extracted_frames"
 
         elif game== "tlou":
-            self.root_dir = Path("/scratch/uceeaty/Data/The Last of Us Part 2/High Contrast/No Return/HC Off") 
+            self.root_dir = Path("/scratch/uceeaty/Data/The Last of Us Part 2/High Contrast/No Return/HC Off")
 
         self.frame_gap = frame_gap
         self.mode = mode
@@ -130,20 +130,33 @@ class Frame_Dataset(Dataset):
         first_frame = _imread_rgb(frames[start_frame_idx])
         first_frame = torch.tensor(first_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
 
-        frame_list = [
-            torch.tensor(
-                _imread_rgb(frames[start_frame_idx + i]) / 255.0, 
-                dtype=torch.float32
-                ).permute(2, 0, 1) 
-                for i in range(1, self.frame_gap)
-        ]
-
         if self.mode == "interpolate":
 
-            last_frame = _imread_rgb(frames[start_frame_idx + self.frame_gap])
-            last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
+            frame_list = [
+                torch.tensor(
+                    _imread_rgb(frames[start_frame_idx + i]) / 255.0, 
+                    dtype=torch.float32
+                    ).permute(2, 0, 1) 
+                    for i in range(1, self.frame_gap)
+            ]
 
-            frame_pair = torch.cat([first_frame, last_frame], dim=0)
+            last_frame = _imread_rgb(frames[start_frame_idx + self.frame_gap])
+
+        elif self.mode == "predict":
+            
+            frame_list = [
+                torch.tensor(
+                    _imread_rgb(frames[start_frame_idx + 1 + i]) / 255.0, 
+                    dtype=torch.float32
+                    ).permute(2, 0, 1) 
+                    for i in range(1, self.frame_gap)
+            ]
+
+            last_frame = _imread_rgb(frames[start_frame_idx + 1])
+        
+        last_frame = torch.tensor(last_frame / 255.0, dtype=torch.float32).permute(2, 0, 1)
+
+        frame_pair = torch.cat([first_frame, last_frame], dim=0)
 
         frame_list = torch.stack(frame_list, dim=0)
 
@@ -153,11 +166,5 @@ class Frame_Dataset(Dataset):
         ]
         
         action_list = torch.cat(action_list, dim=0)
-
-        if self.mode == "interpolate":
-
-            return (frame_pair, action_list), frame_list
         
-        else:
-            
-            return (first_frame, action_list), frame_list
+        return (frame_pair, action_list), frame_list

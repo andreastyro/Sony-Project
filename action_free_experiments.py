@@ -115,7 +115,7 @@ test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
 
 learning_rate = 1e-4
 
-model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode, stochastic=stochastic, noise_sigma=0.1).to(device)
+model = UNet_Free(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode, stochastic=stochastic, noise_sigma=0.1).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.MSELoss()
@@ -143,7 +143,7 @@ train_ssim = []
 val_ssim = []
 
 checkpoint = True
-checkpoint_file = checkpoint_dir / f"checkpoint_LR_{learning_rate}_{mode}_{game}_{mode_type}.pt"
+checkpoint_file = checkpoint_dir / f"checkpoint_LR_{learning_rate}_{mode}_{game}_{mode_type}_action_free.pt"
 
 if checkpoint_file.exists():
     checkpoint = torch.load(checkpoint_file, map_location="cpu")
@@ -155,7 +155,7 @@ if checkpoint_file.exists():
     start_epoch = checkpoint["epoch"] + 1
     print(f"Resumed from epoch {start_epoch}")
 
-log_file = os.path.join(log_dir, f"Logs_LR_{learning_rate}_{mode}_{game}_{mode_type}_{frame_gap-1}_frames.txt")
+log_file = os.path.join(log_dir, f"Logs_LR_{learning_rate}_{mode}_{game}_{mode_type}_{frame_gap-1}_frames_action_free.txt")
 
 for epoch in range(start_epoch, epochs):
 
@@ -292,7 +292,7 @@ for epoch in range(start_epoch, epochs):
         axs_seq[1, t].axis("off")
 
     plt.tight_layout()
-    plt.savefig(f"sequence_grid_{epoch}_{learning_rate}_{mode}_{game}_{mode_type}.png")
+    plt.savefig(f"sequence_grid_{epoch}_{learning_rate}_{mode}_{game}_{mode_type}_action_free.png")
     plt.close(fig_seq)
 
     psnr_value = 0
@@ -365,4 +365,4 @@ axes[2].legend()
 axes[2].legend(loc="lower right")
 
 plt.tight_layout()
-plt.savefig(os.path.join(save_dir, f"Plots_LR_{learning_rate}_{mode}_{game}_{mode_type}_{frame_gap-1}_frames.png"))
+plt.savefig(os.path.join(save_dir, f"Plots_LR_{learning_rate}_{mode}_{game}_{mode_type}_{frame_gap-1}_frames_action_free.png"))
