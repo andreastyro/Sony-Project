@@ -15,8 +15,9 @@ from torchvision.models import vgg19
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as TF
 
-frame_gap = 1
+frame_gap = 20
 frames = frame_gap - 1
 
 astro = Astro_Multi(frame_gap=frame_gap)
 
+astro.__getitem__(100)
