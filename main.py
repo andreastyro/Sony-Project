@@ -27,7 +27,7 @@ os.makedirs(checkpoint_dir, exist_ok=True)
 
 root_dir = os.path.dirname(os.path.abspath(__file__))
 save_dir = os.path.join(root_dir, "Plots")
-log_dir = os.path.join(root_dir, "Logs")
+log_dir = os.path.join(root_dir, "Final Results")
 
 os.makedirs(save_dir, exist_ok=True)
 os.makedirs(log_dir, exist_ok=True)
@@ -84,7 +84,7 @@ mode_type = "stochastic" if stochastic else "deterministic"
 mode = "interpolate"
 game = "astro"
 
-lr_test = True
+lr_test = False
 
 frame_gap = 5
 frames = frame_gap - 1
@@ -113,7 +113,7 @@ test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
 
 # ----------------------------------------------------------------------------------
 
-learning_rate = 1e-4
+learning_rate = 3e-4
 
 model = UNet(frames=frames, action_dim=action_dim * (frame_gap+1), mode=mode, stochastic=stochastic, noise_sigma=0.1).to(device)
 
@@ -124,7 +124,7 @@ psnr = PeakSignalNoiseRatio().to(device)
 ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
 
 start_epoch = 0
-epochs = 10
+epochs = 5
 
 avg_train_loss = 0
 avg_val_loss = 0
